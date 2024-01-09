@@ -1,0 +1,10 @@
+用python ffmpeg实现rtsp推流
+https://zhuanlan.zhihu.com/p/636038025
+
+ffmpeg -re -stream_loop -1 -i C:\Users\hasee\Desktop\20210716093957.avi -c copy -f rtsp rtsp://127.0.0.1:8554/mystream
+
+-i video/bbb_sunflower_1080p_60fps_normal.mp4 -ss 0 -c:v libx264 -rtsp_transport tcp -strict -2  -f rtsp rtsp://127.0.0.1:8554/meinv
+
+
+
+

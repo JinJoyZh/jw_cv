@@ -1,0 +1,284 @@
+
+    
+一、初始化服务
+    1-1.算法服务作为S端，调用方作为C端。
+        C/S开始交互前，C端预先知道：
+            （1）S端http服务地址和端口
+            （2）S端UDP服务地址和端口
+        1-1-1 C端发送初始化信息 C端 => S端
+            C/S开始交互前，C端需要通过UDP向S端发送一条初始化消息：
+                {
+                    "session_type":"initialize"
+                }
+        1-1-2 S端返回服务器状态 S端 => C端
+            S端若状态正常，则返回：
+                {
+                    "session_type":"initialize",
+                    'status':'OK'
+                }
+    
+
+二、远程调用算法功能
+    算法服务支持算法功能有：多目标检测、多目标跟踪、多目标位置解算、侦照区域解算、薄云/沙尘去除。
+    视频流以rtsp协议传输，若启用位置解算，请确认C端向S端推送的视频数据和飞参数据都是实时的，以确保数据同步的效果。
+
+    2-1. 调用组合算法功能
+        2-1-1 支持以下三种算法的组合调用：
+                1. 去雾、去沙尘
+                2. 目标跟踪 + 目标检测 + 位置解算&侦照区域解算
+                3. 图像增强
+        2-1-2 C端发送算法开关命令以及飞参数据。C端 => S端 
+            1. C端用http发送算法调用命令，路径为'/jw/alg'，json格式&字段如下：
+                {
+                    "session_type":"exec_alg",
+                    "alg_combination":"<string-required> 需要调用的算法名称的组合",
+                    "source":"<string-required> 以rtsp://开头的url"
+                }
+                其中：
+                    a. alg_combination字段为调用算法功能的组合，支持如下组合：
+                        （a）值为”defog“                    去雾去沙尘
+                        （b）值为"detection|position"       目标检测&跟踪+位置解算&侦照区域解算
+                        （c）值为"enhance"                  画面增强
+                            (d) 值为"brighten"                 低照度增强
+                            (e) 值为"cloud_det"                云层检测
+                        组合之间用分隔号拼接，表示联合调用。例如，同时开启去雾和图像增强，alg_combination的字段值为"defog|enhance",
+                    同时开启去雾和目标检测&跟踪+位置解算&侦照区域解算,alg_combination的字段值为"defog|detection|position"
+                    b. 若flight_data字段为空，则不进行位置解算。
+
+            2. C端用UDP发送飞参数据，json格式&字段如下：
+                {
+                    "data_type":"flight_data",
+                    "source": "<string - required> 目标源视频的rtsp url",
+                    "flight_data":{
+                        "time":"<int - required> 生成飞参的时间，格式为unix时间戳（秒）",
+                        "roll":"<float-required> 翻滚角，单位：度",
+                        "pitch":"<float-required> 俯仰角，单位：度",
+                        "yaw":"<float-required> 航向角，单位：度",
+                        "camera_latitude":"<float-required> 相机纬度，单位：度",
+                        "camera_longitude":"<float-required> 相机经度，单位：度",
+                        "camera_altitude":"<float-required> 相机海拔，单位：米",
+                        "focal_length":"<int-required> 相机焦距，单位：米"
+                    }
+                }
+
+        2-1-3 S端返回算法执行结果：S端 => C端
+              算法服务接收到命令后，执行算法
+                1. S端用UDP返回json格式如下：
+                    {
+                        "session_type":"exec_alg",
+                        "flight_data_time":"<int-optional> 所用飞参的生成时间，与请求中的time字段相等",
+                        "source":"<string - required>算法当前正在处理的rtsp url,当前算法视频流推送路径为url/alg, 原视频流推送路径为 url/org",
+                        "frame_index":"<int - required> 本次rtsp传输开始为起点，帧的索引值",
+                        "is_key_frame":"<int - required> 当前帧是否为关键帧，1-是，0-否",
+                        "keyframe_path":"<string - optional> 关键帧保存路径",
+                        "width":"<int - optional> 帧的宽度",
+                        "height":"<int - optional> 帧的高度",
+                        "cloudy":"<int - optional> 是否有云， 1-有云 0-无云",
+                        "process_start":"<int - required> 当前帧开始处理的unix时间戳（秒）",
+                        "process_end":"<int - required> 当前帧结束处理的unix时间戳（秒）",
+                        "targets":[
+                            {
+                                "id":"<int - required> 目标id值",
+                                "x1":"<int - required> 矩形框对角点A的x坐标值",
+                                "y1":"<int - required> 矩形框对角点A的y坐标值",
+                                "x2":"<int - required> 矩形框对角点B的x坐标值",
+                                "y2":"<int - required> 矩形框对角点B的y坐标值",
+                                "cls":"<string - required>目标检测分类的类别",
+                                "conf":"<float - required]>置信度",
+                                "lat":"<float - optional> 目标纬度",
+                                "lon":"<float - optional> 目标经度"
+                            },
+                            {
+                                "id":"<int - required> 目标id值",
+                                "x1":"<int - required> 矩形框对角点A的x坐标值",
+                                "y1":"<int - required> 矩形框对角点A的y坐标值",
+                                "x2":"<int - required> 矩形框对角点B的x坐标值",
+                                "y2":"<int - required> 矩形框对角点B的y坐标值",
+                                "cls":"<string - required>目标检测分类的类别",
+                                "conf":"<float - required>置信度",
+                                "lat":"<float - optional> 目标纬度",
+                                "lon":"<float - optional> 目标经度"
+                            }
+                        ],
+                        "reconnaissance_area":{
+                            "lat_1":"<float - required> 矩形框对角点A的纬度",
+                            "lon_1":"<float - required> 矩形框对角点A的经度",
+                            "lat_2":"<float - required> 矩形框对角点B的纬度",
+                            "lon_2":"<float - required> 矩形框对角点B的经度"
+                        },
+                        "rtsp_url":"<string - required> 算法输出视频流，在激活去雾算法后，通过此url拉流查看效果"
+                    }
+                算法运行说明：
+                    (1)目标检测跟踪
+                        S端接收到命令后，持续向C端推送：
+                        a. 多目标检测框的坐标
+                        b. 多目标的标签
+                        c. 每个目标预测置信度
+                    (2)目标跟踪
+                        S端向C端推送的每个目标都带有id
+                    (3)位置解算
+                        根据此条命令中包含的飞参信息，以及当前rtsp中解析出的图像，计算每个目标的经纬度
+                    (4)侦照区域解算
+                        当前侦照区域的顶点坐标（侦照区域按矩形计算，与航拍照片的矩形边界相对应）
+                    (5)算法结果自动推送
+                        S端收到目标检测一次请求之后，持续自动推送检测结果给C端，直到C端停止rtsp推流为止
+                        位置结算功能需要C端持续将实时飞参输给S端
+
+     2-2 手动标注功能 jw/alg
+            业务说明：用户手动在屏幕上用矩形框标出需要识别的目标，输入标签。
+            2-2-1 C端发送用户手动标注信息 C端 => S端 
+                C端用http向S端发送用户标注信息，json格式&字段如下：
+                    {
+                        "session_type":"manual_labelling",
+                        "source":"<string-required> 以rtsp://开头的url",
+                        "cmd":"create",
+                        "shot_time":"<required - int> 截图时间点。在用户启用手动标注时，请先向S端发送截图命令（参见第三节第一条截图说明）。此字段值为截图命令中的send_time",
+                        "targets":[
+                                {
+                                    "x1":"<int - required> 矩形框对角点A的x坐标值",
+                                    "y1":"<int - required> 矩形框对角点A的y坐标值",
+                                    "x2":"<int - required> 矩形框对角点B的x坐标值",
+                                    "y2":"<int - required> 矩形框对角点B的y坐标值",
+                                    "label":"<string - optional>标签"
+                                },
+                                {
+                                    "x1":"<int - required> 矩形框对角点A的x坐标值",
+                                    "y1":"<int - required> 矩形框对角点A的y坐标值",
+                                    "x2":"<int - required> 矩形框对角点B的x坐标值",
+                                    "y2":"<int - required> 矩形框对角点B的y坐标值",
+                                    "label":"<string - optional>标签"
+                                }
+                            ],
+                        "display_width":"<required - int> 前端显示宽度",
+                        "display_height":"<required - int> 前端显示高度"
+                    }
+
+            2-2-2 S端持续返算法运算结果：S端 => C端 
+                S端用UDP持续向C端发送
+                    {
+                        "session_type":"manual_labelling",
+                        "source":"<string-required> 以rtsp://开头的url",
+                        "targets":[
+                                {
+                                    "id":"<string - required> 被跟踪目标的id号",
+                                    "x1":"<int - required> 矩形框对角点A的x坐标值",
+                                    "y1":"<int - required> 矩形框对角点A的y坐标值",
+                                    "x2":"<int - required> 矩形框对角点B的x坐标值",
+                                    "y2":"<int - required> 矩形框对角点B的y坐标值",
+                                    "label":"<string - optional>标签",
+                                    "lat":"<float - optional> 位置解算算法被激活，且C端给出实时飞参，则返回目标纬度",
+                                    "lon":"<float - optional> 位置解算算法被激活，且C端给出实时飞参，则返回目标经度"
+                                },
+                                {
+                                    "id":"<string - required> 被跟踪目标的id号",
+                                    "x1":"<int - required> 矩形框对角点A的x坐标值",
+                                    "y1":"<int - required> 矩形框对角点A的y坐标值",
+                                    "x2":"<int - required> 矩形框对角点B的x坐标值",
+                                    "y2":"<int - required> 矩形框对角点B的y坐标值",
+                                    "label":"<string - optional>标签",
+                                    "lat":"<float - optional> 位置解算算法被激活，且C端给出实时飞参，则返回目标纬度",
+                                    "lon":"<float - optional> 位置解算算法被激活，且C端给出实时飞参，则返回目标经度"
+                                }
+                            ],
+                        "time":"<int - required> 算法算出结果的Unix时间"
+                    }
+
+            2-2-3 C端发送删除某手动标注框命令 C端 => S端 
+                    C端用http向S端发送用户标注信息
+                    {
+                        "session_type":"manual_labelling",
+                        "source":"<string-required> 以rtsp://开头的url",
+                        "cmd":"delete",
+                        "targets":[
+                            "<string-required> 需要删除的id号",
+                            "<string-required> 需要删除的id号"
+                            ],
+                        "time":"<int - required> 算法算出结果的Unix时间"
+                    }
+
+
+三、远程调用业务功能
+    3-1 截图
+        3-1-1. C端用http发送调用命令，路径为'/jw/cmd'，json格式&字段如下：
+                {
+                    "session_type":"scream_shot",
+                    "source":"<string - required> 视频源",
+                    "send_time":"<int - requried> 发出截图命令的unix时间"
+                }
+
+        3-1-2. S端用UDP返回截图路径
+                {
+                    "session_type":"scream_shot",
+                    "source":"<string - required> 视频源",
+                    "save_path":"<string - required> 保存路径",
+                    "receive_time"："<int - requried> 值是send_time的透传",
+                    "prediction":"<json - requried> 值为该帧对应的检测算法输出（不包含手动标注），值等同于 2-1-3节的json"
+                }
+
+    3-2. 录屏
+        3-2-1. C端用http发送调用命令，路径为'/jw/cmd'，json格式&字段如下：
+                {
+                    "session_type":"record_video",
+                    "source":"<string - required> 视频源",
+                    "send_time":"<int - requried> 发出截图命令的unix时间",
+                    "save_videos":"<int - requried　1：开启视频录制  0：关闭视频录制 "
+                }
+
+        3-2-2. S端用UDP返回视频录制路径
+                {
+                    "session_type":"record_video",
+                    "source":"<string - required> 视频源",
+                    "save_path":"<string - required> 保存路径",
+                    "receive_time"："<int - requried> 值是send_time的透传"
+                }
+
+    3-3. 调整目标外框大小
+        目前只支持修改AI算法目标检测的外框大小，不支持修改手动标注目标外框的的大小。
+        3-3-1 C端用http发送调用命令，路径为'/jw/cmd'，json格式&字段如下：
+                {
+                    "session_type":"adjust_boudingbox",
+                    "source":"<required - string> 视频源",
+                    "context":[
+                        {
+                            "id":"<int - required> 目标id号",
+                            "before":{
+                                "x1":"<int - required> 矩形框对角点A的x坐标值",
+                                "y1":"<int - required> 矩形框对角点A的y坐标值",
+                                "x2":"<int - required> 矩形框对角点B的x坐标值",
+                                "y2":"<int - required> 矩形框对角点B的y坐标值"
+                            }，
+                            "after":{
+                                "x1":"<int - required> 矩形框对角点A的x坐标值",
+                                "y1":"<int - required> 矩形框对角点A的y坐标值",
+                                "x2":"<int - required> 矩形框对角点B的x坐标值",
+                                "y2":"<int - required> 矩形框对角点B的y坐标值"
+                            }
+                        },
+                        {
+                            "id":"<int - required> 目标id号",
+                            "before":{
+                                "x1":"<int - required> 矩形框对角点A的x坐标值",
+                                "y1":"<int - required> 矩形框对角点A的y坐标值",
+                                "x2":"<int - required> 矩形框对角点B的x坐标值",
+                                "y2":"<int - required> 矩形框对角点B的y坐标值"
+                            },
+                            "after":{
+                                "x1":"<int - required> 矩形框对角点A的x坐标值",
+                                "y1":"<int - required> 矩形框对角点A的y坐标值",
+                                "x2":"<int - required> 矩形框对角点B的x坐标值",
+                                "y2":"<int - required> 矩形框对角点B的y坐标值"
+                            }
+                        }
+                    ]
+                }
+                其中，"before"字段存放修改前目标外框坐标信息， "after"字段存放修改后目标外框坐标信息。
+                S端接收到修改命令之后，后续推送的目标外框(见2-1-3小节)大小会自动修改
+
+    3-4 传输标出目标外框后的视频流
+        3-4-1. C端用http发送调用命令，路径为'/jw/cmd'，json格式&字段如下：
+                    {
+                        "session_type":"show_box",
+                        "draw_box":"<int - requried　1：视频流里的目标标上外框  0：视频流里的目标除去外框 "
+                        "source":"<string - required> 视频源",
+                        "send_time":"<int - requried> 发出截图命令的unix时间"
+                    }

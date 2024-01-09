@@ -1,0 +1,6 @@
+.vscode/
+20210719095418.avi
+whl/
+inference/*
+sample/*
+.idea/*
